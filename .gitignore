@@ -1,0 +1,4 @@
+dev.md
+__pycache__/
+*.pyc
+data/
