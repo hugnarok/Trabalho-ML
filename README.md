@@ -51,10 +51,10 @@ Regressão logística **sem** as palavras da consulta; mediana de enriquecimento
 | Par | F1 (teste) | Mediana E | Presentes em “ambas” |
 |---|---:|---:|---:|
 | Cogumelo–Alzheimer | 0,966 | 1,65 | 9/10 |
-| Parkinson–Alzheimer | 0,906 | 0,68 | 10/10 |
+| Parkinson–Alzheimer | 0,853 | 0,68 | 10/10 |
 | Couve–Anemia | 0,960 | 0,00 | 4/10 |
 
-No par principal, o filtro eleva o enriquecimento frente à frequência bruta (1,65 vs 1,08). No controle próximo o topo fica mais genérico; em couve–anemia a interseção MeSH é mínima e a validação fica instável — exatamente o tipo de viés discutido no artigo.
+No par principal, a mediana filtrada é 1,65 contra 1,08 da frequência bruta (ICs se sobrepõem; permutação $p=0,059$). No controle próximo o topo fica mais genérico; em couve–anemia a interseção MeSH é mínima e a validação fica instável — exatamente o tipo de viés discutido no artigo.
 
 <p align="center">
   <img src="figuras/pontes_mesh_cogumelo_alzheimer.png" width="720" alt="Pontes MeSH — cogumelo e Alzheimer">

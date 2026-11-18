@@ -25,7 +25,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from scipy.stats import binomtest
-from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_validate, train_test_split
 from sklearn.pipeline import make_pipeline
 
 from par import ANOS, NOME_A, NOME_C, ROTULO_C, SLUG, palavras_das_consultas
@@ -38,6 +38,10 @@ VALIDACAO_CRUZADA = RAIZ / "data" / f"validacao_cruzada_{SLUG}.csv"
 BOOTSTRAP = RAIZ / "data" / f"bootstrap_{SLUG}.csv"
 MCNEMAR = RAIZ / "data" / f"mcnemar_{SLUG}.csv"
 MATRIZES = RAIZ / "data" / f"matrizes_{SLUG}.csv"
+HIPER = RAIZ / "data" / f"hiperparametros_{SLUG}.csv"
+SEMENTES = RAIZ / "data" / f"sementes_{SLUG}.csv"
+
+SEMENTES_EXTRA = (42, 0, 1, 2, 3)
 
 SEMENTE = 42
 DOBRAS = 5
@@ -196,6 +200,74 @@ def teste_mcnemar(y_real, prev_a, prev_b):
     return {"b01": b01, "b10": b10, "p": p}
 
 
+def buscar_hiperparametros(textos_treino, y_treino):
+    """Grade pequena só no treino (5 dobras). O teste não escolhe C nem alpha."""
+    dobras = StratifiedKFold(n_splits=DOBRAS, shuffle=True, random_state=SEMENTE)
+    grades = (
+        (
+            "Regressão logística",
+            LogisticRegression(class_weight="balanced", max_iter=1000, random_state=SEMENTE),
+            {"logisticregression__C": [0.1, 1.0, 10.0]},
+        ),
+        (
+            "Naive Bayes",
+            MultinomialNB(),
+            {"multinomialnb__alpha": [0.1, 1.0, 10.0]},
+        ),
+        (
+            "SVM linear",
+            LinearSVC(class_weight="balanced", random_state=SEMENTE, max_iter=2000),
+            {"linearsvc__C": [0.1, 1.0, 10.0]},
+        ),
+    )
+    linhas = []
+    print("  busca de hiperparâmetros (F1, 5 dobras no treino):")
+    for nome, modelo, grade in grades:
+        busca = GridSearchCV(
+            make_pipeline(novo_vetorizador(), modelo),
+            grade,
+            scoring="f1",
+            cv=dobras,
+            n_jobs=1,
+        )
+        busca.fit(textos_treino, y_treino)
+        chave, valor = next(iter(busca.best_params_.items()))
+        print(f"    {nome}: {chave}={valor}  F1-CV={busca.best_score_:.3f}")
+        linhas.append(
+            {
+                "modelo": nome,
+                "parametro": chave,
+                "valor": valor,
+                "f1_cv": float(busca.best_score_),
+            }
+        )
+    pd.DataFrame(linhas).to_csv(HIPER, index=False)
+
+
+def repetir_sementes(corpus, y, textos, sementes=SEMENTES_EXTRA):
+    """F1 da logística sem palavras da consulta em várias partições 80/20."""
+    linhas = []
+    print("  F1 no teste em 5 sementes (RL, texto sem consulta):")
+    for semente in sementes:
+        idx_treino, idx_teste = train_test_split(
+            np.arange(len(corpus)),
+            test_size=0.2,
+            stratify=y,
+            random_state=semente,
+        )
+        _, _, _, prob_teste = treinar(
+            textos.iloc[idx_treino],
+            y[idx_treino],
+            textos.iloc[idx_teste],
+        )
+        f1 = metricas(y[idx_teste], prob_teste)["f1"]
+        linhas.append({"semente": semente, "f1_teste": f1})
+        print(f"    semente {semente}: F1={f1:.3f}")
+    vals = [row["f1_teste"] for row in linhas]
+    print(f"    média ± desvio: {np.mean(vals):.3f} ± {np.std(vals, ddof=1):.3f}")
+    pd.DataFrame(linhas).to_csv(SEMENTES, index=False)
+
+
 def termos_extremos(vetorizador, modelo, n=12):
     nomes = vetorizador.get_feature_names_out()
     coeficientes = modelo.coef_[0]
@@ -206,7 +278,7 @@ def termos_extremos(vetorizador, modelo, n=12):
 
 
 def desenhar(termos_negativos, termos_positivos):
-    fig, eixos = plt.subplots(1, 2, figsize=(10, 5.2))
+    fig, eixos = plt.subplots(1, 2, figsize=(9.2, 4.6), sharey=False)
     paineis = (
         (eixos[0], termos_negativos[::-1], NOME_NEGATIVO, "#1f4e79"),
         (eixos[1], termos_positivos[::-1], NOME_POSITIVO, "#0f6e56"),
@@ -214,13 +286,18 @@ def desenhar(termos_negativos, termos_positivos):
     for eixo, termos, titulo, cor in paineis:
         rotulos = [nome for nome, _ in termos]
         valores = [abs(peso) for _, peso in termos]
-        eixo.barh(rotulos, valores, color=cor)
-        eixo.set_title(titulo)
-        eixo.set_xlabel("peso absoluto na regressão logística")
-    fig.suptitle(f"Termos que separam {NOME_POSITIVO} e {NOME_NEGATIVO}, sem as palavras da consulta")
+        eixo.barh(rotulos, valores, color=cor, height=0.72)
+        eixo.set_title(titulo, fontsize=11)
+        eixo.set_xlabel("peso absoluto na regressão logística", fontsize=9)
+        eixo.tick_params(axis="y", labelsize=8)
+        eixo.tick_params(axis="x", labelsize=8)
+    fig.suptitle(
+        f"Termos que separam {NOME_POSITIVO} e {NOME_NEGATIVO}, sem as palavras da consulta",
+        fontsize=11,
+    )
     fig.tight_layout()
     FIGURA.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(FIGURA, dpi=150)
+    fig.savefig(FIGURA, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -383,6 +460,10 @@ def main():
         r = teste_mcnemar(y_teste, previsoes[a], previsoes[b])
         linhas_mcnemar.append({"modelo_a": a, "modelo_b": b, **r})
         print(f"  {a} vs {b}: b10={r['b10']} b01={r['b01']} p={r['p']:.4f}")
+
+    print("\nHiperparâmetros e estabilidade (texto sem palavras da consulta):")
+    buscar_hiperparametros(textos.iloc[indice_treino], y_treino)
+    repetir_sementes(corpus, y, textos)
 
     tabela = pd.DataFrame(linhas)
     METRICAS.parent.mkdir(parents=True, exist_ok=True)

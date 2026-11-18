@@ -28,7 +28,13 @@ PARES = {
         ),
         # "Mushroom body" = estrutura do cérebro de insetos, não um cogumelo.
         "EXCLUIR": '"mushroom body"[Title/Abstract] OR "mushroom bodies"[Title/Abstract]',
-        "PALAVRAS_EXTRAS": [r"erinaceus", r"lion'?s?\s*mane"],
+        "PALAVRAS_EXTRAS": [
+            r"erinaceus",
+            r"lion'?s?\s*mane",
+            r"ad",
+            r"lucidum",
+            r"ganoderma",
+        ],
         "MESH_DAS_CONSULTAS": {
             "Alzheimer Disease",
             "Mushrooms",
@@ -56,7 +62,7 @@ PARES = {
         "CONSULTA_A": '"Alzheimer"[Title/Abstract]',
         "CONSULTA_C": '"Parkinson"[Title/Abstract]',
         "EXCLUIR": "",
-        "PALAVRAS_EXTRAS": [r"parkinsonian", r"parkinsonism"],
+        "PALAVRAS_EXTRAS": [r"parkinsonian", r"parkinsonism", r"ad", r"pd"],
         "MESH_DAS_CONSULTAS": {
             "Alzheimer Disease",
             "Parkinson Disease",

@@ -220,16 +220,73 @@ def validar(pontes, tabela, corpus, k=TOP_K):
     return resultado
 
 
-def classificar(termo, artigos_a, artigos_c, n_a, n_c):
+def e_stop(termo):
+    """Casa o descritor exato e qualificadores (ex.: Mice, Inbred C57BL)."""
     if termo in STOP:
+        return True
+    for s in STOP:
+        if termo.startswith(s + ",") or termo.startswith(s + " "):
+            return True
+    return False
+
+
+def classificar(termo, artigos_a, artigos_c, n_a, n_c, fracao=FRACAO_GENERICA):
+    if e_stop(termo):
         return "stop"
     if termo in MESH_DAS_CONSULTAS:
         return "nomeia a consulta"
-    if max(artigos_a / n_a, artigos_c / n_c) >= FRACAO_GENERICA:
+    if max(artigos_a / n_a, artigos_c / n_c) >= fracao:
         return "frequente demais"
     if min(artigos_a, artigos_c) < MINIMO_DE_CADA_LADO:
         return "evidencia fraca"
     return "ponte"
+
+
+def sensibilidade_corte(tabela, corpus, n_a, n_c, cortes=(0.15, 0.25, 0.40)):
+    """Refaz só o corte de cobertura, sem sobrescrever a validação principal (25%)."""
+    com_mesh = corpus.mesh.notna()
+    ambas_mask = (corpus.literatura == "ambas") & com_mesh
+    exclusivas_mask = corpus.literatura.isin([LADO_A, LADO_C]) & com_mesh
+    ambas = contar(corpus.loc[ambas_mask, "mesh"])
+    n_ambas = int(ambas_mask.sum())
+    exclusivas = contar(corpus.loc[exclusivas_mask, "mesh"])
+    n_exclusivas = int(exclusivas_mask.sum())
+    ambas_listas = _mesh_por_artigo(corpus.loc[ambas_mask, "mesh"])
+    exclusivas_listas = _mesh_por_artigo(corpus.loc[exclusivas_mask, "mesh"])
+
+    linhas = []
+    for fracao in cortes:
+        pontes = tabela.copy()
+        pontes["sit_corte"] = [
+            classificar(row.termo, row.artigos_a, row.artigos_c, n_a, n_c, fracao=fracao)
+            for row in tabela.itertuples(index=False)
+        ]
+        pontes = pontes[pontes.sit_corte == "ponte"].sort_values("suporte", ascending=False)
+        if pontes.empty or n_ambas == 0:
+            print(f"  corte {fracao:.0%}: 0 pontes")
+            linhas.append({"corte": fracao, "n_pontes": 0, "mediana": float("nan"), "presentes": 0})
+            continue
+        topo = list(pontes.head(TOP_K).termo)
+        valores = [enriquecimento(t, ambas, n_ambas, exclusivas, n_exclusivas) for t in topo]
+        presentes = sum(ambas[t] > 0 for t in topo)
+        med = median(valores)
+        _, p_perm = permutacao_mediana(topo, list(pontes.termo), ambas_listas, exclusivas_listas)
+        print(
+            f"  corte {fracao:.0%}: {len(pontes)} pontes  "
+            f"mediana E={med:.2f}  presentes={presentes}/{len(topo)}  p={p_perm:.3f}"
+        )
+        linhas.append(
+            {
+                "corte": fracao,
+                "n_pontes": int(len(pontes)),
+                "mediana": med,
+                "presentes": presentes,
+                "p_permutacao": p_perm,
+            }
+        )
+    saida = RAIZ / "data" / f"sensibilidade_corte_{SLUG}.csv"
+    pd.DataFrame(linhas).to_csv(saida, index=False)
+    print(f"  sensibilidade salva em {saida}")
 
 
 def main():
@@ -283,34 +340,44 @@ def main():
     print("\nValidação com os artigos que já citam os dois temas:")
     validar(pontes, tabela, corpus)
 
-    desenhar(pontes.head(12))
+    desenhar(pontes.head(TOP_K))
     print(f"\nTabela em {TABELA}")
     print(f"Figura em {FIGURA}")
+
+    print("\nSensibilidade do corte de cobertura:")
+    sensibilidade_corte(tabela, corpus, n_a, n_c)
 
 
 def desenhar(pontes):
     pontes = pontes.iloc[::-1]
     cores = ["#0f6e56" if classico else "#1f4e79" for classico in pontes.mecanismo_classico]
     rotulos = [
-        f"{termo}  ({artigos_a}/{artigos_c})"
+        f"{termo} ({artigos_a}/{artigos_c})"
         for termo, artigos_a, artigos_c in zip(
             pontes.termo, pontes.artigos_a, pontes.artigos_c
         )
     ]
-    fig, eixo = plt.subplots(figsize=(9.4, 5.6))
-    eixo.barh(rotulos, pontes.suporte, color=cores)
-    eixo.set_xlabel("suporte (média harmônica dos artigos nos dois lados)")
-    eixo.set_title(f"Conceitos MeSH nas duas literaturas\n(entre parênteses: artigos de {NOME_A} / {NOME_C})")
+    fig, eixo = plt.subplots(figsize=(8.6, 4.8))
+    eixo.barh(rotulos, pontes.suporte, color=cores, height=0.72)
+    eixo.set_xlabel("suporte (média harmônica dos artigos nos dois lados)", fontsize=9)
+    eixo.set_title(
+        f"Top-{len(pontes)} MeSH nas duas literaturas\n"
+        f"(entre parênteses: artigos de {NOME_A} / {NOME_C})",
+        fontsize=11,
+    )
+    eixo.tick_params(axis="y", labelsize=8)
+    eixo.tick_params(axis="x", labelsize=8)
     eixo.legend(
         handles=[
             Patch(facecolor="#0f6e56", label="via já discutida na literatura"),
             Patch(facecolor="#1f4e79", label="outra ponte"),
         ],
         loc="lower right",
+        fontsize=8,
     )
     fig.tight_layout()
     FIGURA.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(FIGURA, dpi=150)
+    fig.savefig(FIGURA, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 
